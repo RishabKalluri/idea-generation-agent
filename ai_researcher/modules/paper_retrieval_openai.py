@@ -2,11 +2,32 @@
 Paper Retrieval Module using OpenAI API (GPT-4).
 
 This is an OpenAI-compatible version of paper_retrieval.py
+No anthropic dependency - uses direct file loading.
 """
 
 import re
+import os
+import sys
+import importlib.util
 from typing import List, Dict, Tuple, Optional
-from utils import SemanticScholarClient, Paper
+
+# Load semantic_scholar.py directly to avoid utils/__init__.py which imports anthropic
+def _load_semantic_scholar():
+    """Load SemanticScholarClient and Paper without triggering anthropic import."""
+    # Find the semantic_scholar.py file
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    ss_path = os.path.join(parent_dir, "utils", "semantic_scholar.py")
+    
+    if not os.path.exists(ss_path):
+        raise ImportError(f"Cannot find semantic_scholar.py at {ss_path}")
+    
+    spec = importlib.util.spec_from_file_location("semantic_scholar_direct", ss_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SemanticScholarClient, module.Paper
+
+SemanticScholarClient, Paper = _load_semantic_scholar()
 
 
 # ============================================================================
