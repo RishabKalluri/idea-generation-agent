@@ -1,0 +1,150 @@
+1. Title: Chain-of-Verification Reduces Hallucination in Large Language Models
+
+2. Problem Statement: Large language models (LLMs) frequently generate plausible-sounding but factually incorrect information, a phenomenon known as hallucination. This is particularly problematic in knowledge-intensive tasks such as question answering, biography generation, and fact-based text generation. Hallucinations undermine user trust and limit the deployment of LLMs in high-stakes applications where accuracy is critical. The challenge is that LLMs produce confident-sounding outputs even when the information is fabricated, making it difficult for users to distinguish accurate from inaccurate responses.
+
+3. Motivation: Existing methods for reducing hallucination fall into three categories: training-time correction (which requires expensive fine-tuning on curated data), retrieval augmentation (which requires external knowledge bases), and tool-use (which requires integration with external systems). These approaches have significant limitations: training-based methods are expensive and don't generalize well, retrieval requires maintaining large knowledge bases, and tool-use adds latency and complexity.
+
+Our key insight is that LLMs themselves have the capability to verify their own outputs when properly prompted. Just as humans naturally double-check important facts by asking themselves verification questions, LLMs can be guided to generate verification questions about their responses and then answer these questions independently. By comparing the verification answers with the original response, inconsistencies (which often indicate hallucinations) can be identified and corrected. This self-verification approach requires no additional training, no external knowledge bases, and works with any LLM that can follow instructions.
+
+4. Proposed Method: Chain-of-Verification (CoVe) operates in four stages:
+
+(1) Generate Baseline Response: Given a user query, the LLM generates an initial response using standard prompting. This response may contain hallucinations.
+
+(2) Plan Verifications: The LLM is prompted to analyze its own response and generate a list of verification questions. These questions target specific factual claims that can be independently verified. For example, if the response mentions "Einstein was born in 1879 in Germany," verification questions might include "What year was Einstein born?" and "Where was Einstein born?"
+
+(3) Execute Verifications: Each verification question is answered independently by the LLM, without access to the original response. This prevents the model from simply repeating its original (potentially incorrect) claims. The independent answers are compared against the corresponding claims in the original response.
+
+(4) Generate Final Verified Response: Based on any inconsistencies discovered between the verification answers and the original response, the LLM generates a revised response that corrects identified errors. If no inconsistencies are found, the original response is retained.
+
+We explore several variants: Joint (all verification questions answered together), 2-Step (questions generated first, then answered), and Factored (each question answered completely independently).
+
+5. Step-by-Step Experiment Plan:
+
+Step 1: Dataset Preparation
+- Use MultiSpanQA dataset for closed-book question answering (multi-entity questions)
+- Use FactScore dataset for biography generation (long-form text about people)
+- Use Wiki-Category dataset for list-based questions (e.g., "Name politicians born in Boston")
+
+Step 2: Baseline Implementation
+- Implement zero-shot prompting baseline
+- Implement Chain-of-Thought prompting baseline
+- Implement few-shot prompting baseline with 5 examples
+
+Step 3: CoVe Implementation
+Prompt for baseline response:
+```
+Answer the following question:
+Q: {question}
+A:
+```
+
+Prompt for planning verifications:
+```
+Given the question and answer below, generate a list of verification questions that would help verify the factual accuracy of the answer.
+
+Question: {question}
+Answer: {baseline_response}
+
+List verification questions:
+```
+
+Prompt for executing verifications (factored):
+```
+Answer the following question:
+Q: {verification_question}
+A:
+```
+
+Prompt for final response:
+```
+Given the original question and answer, along with the verification results below, generate a corrected answer that fixes any inconsistencies.
+
+Original Question: {question}
+Original Answer: {baseline_response}
+
+Verification Results:
+{verification_qa_pairs}
+
+Corrected Answer:
+```
+
+Step 4: Evaluation
+- Measure precision (% of generated facts that are correct)
+- Measure recall (% of expected facts that are generated)
+- Measure FactScore for biography generation
+- Conduct human evaluation on 100 samples for each dataset
+
+Step 5: Ablation Studies
+- Compare Joint vs. 2-Step vs. Factored verification
+- Vary number of verification questions (1, 3, 5, 10)
+- Test with different LLMs (GPT-4, Claude-3, LLaMA-3-70B)
+
+6. Test Case Examples:
+
+Example 1: Baseline Failure Case
+
+Input Question: "Name some politicians who were born in Boston."
+
+Baseline Prompt:
+```
+Answer the following question:
+Q: Name some politicians who were born in Boston.
+A:
+```
+
+Baseline Output (contains hallucinations):
+"Some politicians born in Boston include John F. Kennedy, John Adams, Benjamin Franklin, and Samuel Adams."
+
+Analysis: Benjamin Franklin was actually born in Boston, but this is correct. However, John F. Kennedy was born in Brookline, MA, not Boston. John Adams was born in Braintree, MA. The baseline confidently includes incorrect information.
+
+Example 2: CoVe Success Case
+
+Step 1 - Baseline Response:
+"Some politicians born in Boston include John F. Kennedy, John Adams, Benjamin Franklin, and Samuel Adams."
+
+Step 2 - Generated Verification Questions:
+1. "Where was John F. Kennedy born?"
+2. "Where was John Adams born?"
+3. "Where was Benjamin Franklin born?"
+4. "Where was Samuel Adams born?"
+
+Step 3 - Verification Answers (answered independently):
+1. "John F. Kennedy was born in Brookline, Massachusetts."
+2. "John Adams was born in Braintree, Massachusetts."
+3. "Benjamin Franklin was born in Boston, Massachusetts."
+4. "Samuel Adams was born in Boston, Massachusetts."
+
+Step 4 - Inconsistency Detection:
+- JFK: Original says Boston, verification says Brookline → INCONSISTENT
+- John Adams: Original says Boston, verification says Braintree → INCONSISTENT
+- Benjamin Franklin: Original says Boston, verification says Boston → CONSISTENT
+- Samuel Adams: Original says Boston, verification says Boston → CONSISTENT
+
+Step 5 - Final Corrected Response:
+"Politicians who were born in Boston include Benjamin Franklin and Samuel Adams. Note that John F. Kennedy was born in Brookline, MA, and John Adams was born in Braintree, MA, which are near Boston but not in Boston proper."
+
+Why CoVe Succeeds: By answering verification questions independently (without seeing the original response), the model draws on its knowledge more accurately. When asked directly "Where was JFK born?", the model correctly answers Brookline, revealing the error in the original response. This allows the final response to correct the hallucinations.
+
+7. Fallback Plan:
+
+If CoVe does not significantly reduce hallucinations:
+
+Plan A - Analysis and Debugging:
+1. Analyze cases where verification failed to catch hallucinations (verification questions were answered incorrectly)
+2. Analyze cases where verification introduced new errors
+3. Categorize failure modes (e.g., entity confusion, date errors, fabricated facts)
+4. Report these patterns as insights into LLM verification capabilities
+
+Plan B - Method Variations:
+1. Try using a different LLM for verification than for initial generation
+2. Experiment with retrieval-augmented verification (use search results to verify)
+3. Try majority voting with multiple verification rounds
+4. Implement confidence-weighted response aggregation
+
+Plan C - Pivot to Analysis Paper:
+1. Conduct detailed analysis of when self-verification works vs. fails
+2. Compare self-verification accuracy across different types of factual claims
+3. Study the relationship between model size and verification capability
+4. Provide recommendations for when to use self-verification vs. external verification
+
+The analysis paper could provide valuable insights into the limits of LLM self-knowledge and inform future research on more reliable verification methods.

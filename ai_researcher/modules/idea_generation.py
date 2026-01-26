@@ -64,6 +64,36 @@ Proposed Method: {self.proposed_method}
 Experiment Plan: {self.experiment_plan}"""
 
 
+@dataclass
+class FullProposal:
+    """Dataclass representing a full research proposal."""
+    title: str
+    problem_statement: str
+    motivation: str
+    proposed_method: str
+    experiment_plan: str
+    test_case_examples: str
+    fallback_plan: str
+    raw_text: str = ""
+    seed_idea: Optional['SeedIdea'] = None
+    
+    def to_string(self) -> str:
+        """Convert to formatted string."""
+        return f"""1. Title: {self.title}
+
+2. Problem Statement: {self.problem_statement}
+
+3. Motivation: {self.motivation}
+
+4. Proposed Method: {self.proposed_method}
+
+5. Step-by-Step Experiment Plan: {self.experiment_plan}
+
+6. Test Case Examples: {self.test_case_examples}
+
+7. Fallback Plan: {self.fallback_plan}"""
+
+
 # ============================================================================
 # PROMPTS AND TEMPLATES
 # ============================================================================
@@ -107,6 +137,56 @@ Respond with your idea in this exact format:
 RAG_SECTION_TEMPLATE = """Here are some relevant papers to inspire your idea (but don't just copy them):
 
 {papers}"""
+
+
+# ============================================================================
+# FULL PROPOSAL TEMPLATES (from Appendix B)
+# ============================================================================
+
+FULL_PROPOSAL_TEMPLATE = """1. Title: A concise statement of the main research question to be used as the paper title.
+
+2. Problem Statement: Clearly define the problem your research intends to address. Explain clearly why this problem is interesting and important.
+
+3. Motivation: Explain why existing methods are not good enough to solve the problem, and explain the inspiration behind the new proposed method. You should also motivate why the proposed method would work better than existing baselines on the problem.
+
+4. Proposed Method: Explain how the proposed method works, describe all the essential steps.
+
+5. Step-by-Step Experiment Plan: Break down every single step of the experiments, make sure every step is executable. Cover all essential details such as the datasets, models, and metrics to be used. If the project involves prompting, give some example prompts for each step.
+
+6. Test Case Examples: Give at least two concrete examples. The first example should show how the baseline method fails on the test case. If there are multiple baselines, give examples for all of them. The second example should show how the proposed method succeeds on the test case. For each test case, include the input (test example and the full prompt) and the expected output. You should also provide an explanation for why the outputs from the proposed prompt are better. If the proposed method has multiple steps, break them down into intermediate steps.
+
+7. Fallback Plan: Propose some alternative plans for what should the students do if the proposed method doesn't manage to satisfy the success criteria. For example, you can suggest additional analysis to help debug why the proposed method didn't work, which could inform alternative new methods, or just turn the project into an analysis paper instead by offering some interesting ablation and insights."""
+
+
+EXPAND_IDEA_PROMPT = """You are an expert NLP researcher. Expand the following seed idea into a complete project proposal.
+
+Seed Idea:
+{seed_idea}
+
+{demo_section}
+
+Expand this into a detailed project proposal following this template exactly:
+
+{full_proposal_template}
+
+Requirements:
+- The proposal should be detailed enough for a PhD student to execute
+- Include specific dataset names (real datasets from HuggingFace or standard benchmarks)
+- Include specific model names (e.g., GPT-4, Claude-3.5, LLaMA-3-70B)
+- The test case examples should be concrete with actual example inputs and expected outputs
+- The experiment plan should be executable with API access (no extensive GPU training required)
+- Include relevant baselines to compare against
+
+Provide the complete proposal:"""
+
+
+DEMO_PROPOSAL_SECTION = """Here is an example of a complete proposal to show the expected level of detail:
+
+{demo_example}
+
+---
+
+Now expand the seed idea above with similar level of detail:"""
 
 
 # ============================================================================
@@ -501,30 +581,265 @@ def _call_llm_openai(client, model_name: str, prompt: str, max_tokens: int = 102
 
 
 # ============================================================================
-# FULL PROPOSAL GENERATION (Placeholder for future implementation)
+# FULL PROPOSAL GENERATION
 # ============================================================================
 
+def load_full_proposal_demo() -> Optional[str]:
+    """Load the full proposal demo example."""
+    demo_dir = get_demo_examples_dir()
+    demo_path = os.path.join(demo_dir, "full_proposal_example.txt")
+    
+    if os.path.exists(demo_path):
+        try:
+            with open(demo_path, 'r') as f:
+                return f.read().strip()
+        except Exception as e:
+            print(f"Warning: Could not load full proposal demo: {e}")
+    
+    return None
+
+
+def expand_to_full_proposal(
+    seed_idea: SeedIdea,
+    client,
+    model_name: str,
+    use_demo: bool = True
+) -> Optional[FullProposal]:
+    """
+    Expand a seed idea into a full project proposal.
+    
+    Args:
+        seed_idea: The seed idea to expand
+        client: OpenAI client
+        model_name: Model to use (e.g., "gpt-4")
+        use_demo: Whether to include demo example for reference
+    
+    Returns:
+        FullProposal object or None if parsing fails
+    """
+    print(f"\n[Full Proposal] Expanding: {seed_idea.title[:50]}...")
+    
+    # Load demo example if requested
+    demo_section = ""
+    if use_demo:
+        demo = load_full_proposal_demo()
+        if demo:
+            demo_section = DEMO_PROPOSAL_SECTION.format(demo_example=demo)
+    
+    # Build prompt
+    prompt = EXPAND_IDEA_PROMPT.format(
+        seed_idea=seed_idea.to_string(),
+        demo_section=demo_section,
+        full_proposal_template=FULL_PROPOSAL_TEMPLATE
+    )
+    
+    try:
+        # Call LLM with larger token limit for detailed proposal
+        response = _call_llm_openai(client, model_name, prompt, max_tokens=4096)
+        
+        # Parse response
+        proposal = parse_full_proposal(response)
+        
+        if proposal:
+            proposal.seed_idea = seed_idea
+            print(f"[Full Proposal] ✓ Successfully expanded")
+            return proposal
+        else:
+            print(f"[Full Proposal] ✗ Failed to parse response")
+            return None
+            
+    except Exception as e:
+        print(f"[Full Proposal] ✗ Error: {e}")
+        return None
+
+
+def parse_full_proposal(response: str) -> Optional[FullProposal]:
+    """
+    Parse LLM response into FullProposal dataclass.
+    
+    Args:
+        response: Raw LLM response text
+        
+    Returns:
+        FullProposal object or None if parsing fails
+    """
+    try:
+        # Extract each section
+        sections = {}
+        
+        # Define section patterns
+        patterns = [
+            (r'1\.\s*Title:?\s*(.+?)(?=2\.\s*Problem Statement|$)', 'title'),
+            (r'2\.\s*Problem Statement:?\s*(.+?)(?=3\.\s*Motivation|$)', 'problem_statement'),
+            (r'3\.\s*Motivation:?\s*(.+?)(?=4\.\s*Proposed Method|$)', 'motivation'),
+            (r'4\.\s*Proposed Method:?\s*(.+?)(?=5\.\s*(?:Step-by-Step\s*)?Experiment Plan|$)', 'proposed_method'),
+            (r'5\.\s*(?:Step-by-Step\s*)?Experiment Plan:?\s*(.+?)(?=6\.\s*Test Case Examples|$)', 'experiment_plan'),
+            (r'6\.\s*Test Case Examples:?\s*(.+?)(?=7\.\s*Fallback Plan|$)', 'test_case_examples'),
+            (r'7\.\s*Fallback Plan:?\s*(.+?)(?=$)', 'fallback_plan'),
+        ]
+        
+        for pattern, key in patterns:
+            match = re.search(pattern, response, re.DOTALL | re.IGNORECASE)
+            if match:
+                sections[key] = match.group(1).strip()
+        
+        # Check if all required sections are present
+        required = ['title', 'problem_statement', 'motivation', 'proposed_method', 
+                   'experiment_plan', 'test_case_examples', 'fallback_plan']
+        
+        if not all(key in sections for key in required):
+            # Try fallback parsing
+            return _parse_full_proposal_fallback(response)
+        
+        return FullProposal(
+            title=sections['title'],
+            problem_statement=sections['problem_statement'],
+            motivation=sections['motivation'],
+            proposed_method=sections['proposed_method'],
+            experiment_plan=sections['experiment_plan'],
+            test_case_examples=sections['test_case_examples'],
+            fallback_plan=sections['fallback_plan'],
+            raw_text=response
+        )
+        
+    except Exception as e:
+        print(f"Warning: Could not parse full proposal: {e}")
+        return None
+
+
+def _parse_full_proposal_fallback(response: str) -> Optional[FullProposal]:
+    """Fallback parser for proposals with slightly different formatting."""
+    try:
+        lines = response.strip().split('\n')
+        sections = {}
+        current_section = None
+        current_content = []
+        
+        section_markers = {
+            'title': ['1.', 'title:'],
+            'problem_statement': ['2.', 'problem statement:', 'problem:'],
+            'motivation': ['3.', 'motivation:'],
+            'proposed_method': ['4.', 'proposed method:', 'method:'],
+            'experiment_plan': ['5.', 'experiment plan:', 'step-by-step'],
+            'test_case_examples': ['6.', 'test case', 'examples:'],
+            'fallback_plan': ['7.', 'fallback plan:', 'fallback:']
+        }
+        
+        for line in lines:
+            line_lower = line.lower().strip()
+            
+            # Check if this line starts a new section
+            matched_section = None
+            for section_name, markers in section_markers.items():
+                for marker in markers:
+                    if line_lower.startswith(marker):
+                        matched_section = section_name
+                        break
+                if matched_section:
+                    break
+            
+            if matched_section:
+                # Save previous section
+                if current_section:
+                    sections[current_section] = '\n'.join(current_content).strip()
+                
+                # Start new section
+                current_section = matched_section
+                # Get content after the marker
+                content_start = line.find(':')
+                if content_start != -1:
+                    first_line = line[content_start + 1:].strip()
+                else:
+                    first_line = ""
+                current_content = [first_line] if first_line else []
+            else:
+                if current_section:
+                    current_content.append(line)
+        
+        # Save last section
+        if current_section:
+            sections[current_section] = '\n'.join(current_content).strip()
+        
+        # Build proposal if we have enough sections
+        if 'title' in sections and len(sections) >= 4:
+            return FullProposal(
+                title=sections.get('title', ''),
+                problem_statement=sections.get('problem_statement', ''),
+                motivation=sections.get('motivation', ''),
+                proposed_method=sections.get('proposed_method', ''),
+                experiment_plan=sections.get('experiment_plan', ''),
+                test_case_examples=sections.get('test_case_examples', ''),
+                fallback_plan=sections.get('fallback_plan', ''),
+                raw_text=response
+            )
+        
+        return None
+        
+    except Exception:
+        return None
+
+
+def expand_ideas_to_proposals(
+    ideas: List[SeedIdea],
+    client,
+    model_name: str,
+    use_demo: bool = True,
+    show_progress: bool = True
+) -> List[FullProposal]:
+    """
+    Expand multiple seed ideas into full proposals.
+    
+    Args:
+        ideas: List of seed ideas to expand
+        client: OpenAI client
+        model_name: Model to use
+        use_demo: Whether to include demo example
+        show_progress: Whether to show progress bar
+    
+    Returns:
+        List of FullProposal objects
+    """
+    print(f"\n[Full Proposal Expansion] Expanding {len(ideas)} ideas...")
+    
+    proposals = []
+    failed = 0
+    
+    iterator = ideas
+    if show_progress:
+        iterator = tqdm(ideas, desc="Expanding to proposals")
+    
+    for idea in iterator:
+        proposal = expand_to_full_proposal(idea, client, model_name, use_demo)
+        
+        if proposal:
+            proposals.append(proposal)
+        else:
+            failed += 1
+    
+    print(f"\n[Full Proposal Expansion] Complete!")
+    print(f"  Expanded: {len(proposals)} proposals")
+    print(f"  Failed: {failed}")
+    
+    return proposals
+
+
 def generate_full_proposal(seed_idea: SeedIdea, rag_context: Optional[str], 
-                          client, model_name: str) -> str:
+                          client, model_name: str) -> Optional[FullProposal]:
     """
     Generate full research proposal from seed idea.
     
+    This is a convenience wrapper around expand_to_full_proposal.
+    
     Args:
         seed_idea: Initial seed idea
-        rag_context: Optional RAG context from papers
+        rag_context: Optional RAG context from papers (not used in current implementation)
         client: OpenAI client
         model_name: Model to use
         
     Returns:
-        Full research proposal text
+        FullProposal object or None if generation fails
     """
-    # TODO: Implement full proposal generation
-    # This will expand the seed idea into a full proposal with:
-    # - Detailed methodology
-    # - Related work analysis
-    # - Specific experiments
-    # - Expected results
-    pass
+    return expand_to_full_proposal(seed_idea, client, model_name, use_demo=True)
 
 
 # ============================================================================
@@ -559,3 +874,33 @@ def load_ideas_from_file(filepath: str) -> List[SeedIdea]:
                 ideas.append(idea)
     
     return ideas
+
+
+def save_proposals_to_file(proposals: List[FullProposal], filepath: str):
+    """Save full proposals to a text file."""
+    with open(filepath, 'w') as f:
+        for i, proposal in enumerate(proposals, 1):
+            f.write(f"{'='*80}\n")
+            f.write(f"PROPOSAL {i}\n")
+            f.write(f"{'='*80}\n\n")
+            f.write(proposal.to_string())
+            f.write(f"\n\n")
+    print(f"Saved {len(proposals)} proposals to {filepath}")
+
+
+def load_proposals_from_file(filepath: str) -> List[FullProposal]:
+    """Load proposals from a text file."""
+    proposals = []
+    with open(filepath, 'r') as f:
+        content = f.read()
+    
+    # Split by proposal separator
+    proposal_blocks = re.split(r'={80}\nPROPOSAL \d+\n={80}', content)
+    
+    for block in proposal_blocks:
+        if block.strip():
+            proposal = parse_full_proposal(block)
+            if proposal:
+                proposals.append(proposal)
+    
+    return proposals
