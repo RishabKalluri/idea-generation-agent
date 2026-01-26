@@ -1,8 +1,8 @@
 """Modules for AI Research Idea Generation Pipeline."""
 
 from .paper_retrieval import (
-    retrieve_papers, 
-    build_rag_context, 
+    retrieve_papers,
+    build_rag_context,
     retrieve_diverse_papers,
     deduplicate_papers
 )

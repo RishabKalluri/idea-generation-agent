@@ -6,10 +6,12 @@ import os
 
 # API Keys
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY", "")
 
 # Model Settings
-MODEL_NAME = "claude-sonnet-4-20250514"
+MODEL_NAME = "claude-sonnet-4-20250514"  # For Anthropic
+OPENAI_MODEL_NAME = "gpt-4"  # For OpenAI (or "gpt-3.5-turbo" for cheaper/faster)
 
 # Idea Generation Parameters
 NUM_SEED_IDEAS = 4000

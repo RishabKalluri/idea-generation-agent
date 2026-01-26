@@ -1,9 +1,7 @@
 """
-Paper Retrieval Module using Semantic Scholar RAG.
+Paper Retrieval Module using OpenAI API (GPT-4).
 
-This module handles retrieving relevant papers from Semantic Scholar
-to provide context for idea generation. Uses LLM-guided retrieval
-to intelligently search for papers.
+This is an OpenAI-compatible version of paper_retrieval.py
 """
 
 import re
@@ -12,7 +10,7 @@ from utils import SemanticScholarClient, Paper
 
 
 # ============================================================================
-# PROMPTS
+# PROMPTS (same as paper_retrieval.py)
 # ============================================================================
 
 RETRIEVAL_AGENT_PROMPT = """You are a research assistant tasked with finding relevant papers on a topic.
@@ -63,19 +61,19 @@ Provide your score as a single integer from 1-10, and nothing else."""
 
 
 # ============================================================================
-# MAIN RETRIEVAL FUNCTION
+# MAIN RETRIEVAL FUNCTION (OpenAI version)
 # ============================================================================
 
-def retrieve_papers(topic: str, client, model_name: str, 
+def retrieve_papers(topic: str, client, model_name: str = "gpt-4", 
                    target_papers: int = 120, min_score: int = 7) -> List[Paper]:
     """
     Given a research topic, use an LLM to generate Semantic Scholar API calls
-    and retrieve relevant papers.
+    and retrieve relevant papers. OpenAI-compatible version.
     
     Args:
         topic: Research topic description
-        client: Anthropic client for LLM calls
-        model_name: Model to use for generating API calls
+        client: OpenAI client for LLM calls
+        model_name: Model to use (default: "gpt-4", also works with "gpt-3.5-turbo")
         target_papers: Target number of papers to retrieve (default: 120)
         min_score: Minimum relevance score to keep papers (default: 7)
     
@@ -92,6 +90,7 @@ def retrieve_papers(topic: str, client, model_name: str,
     print(f"\n[Paper Retrieval] Starting LLM-guided retrieval for topic:")
     print(f"  {topic}")
     print(f"  Target: {target_papers} papers")
+    print(f"  Model: {model_name}")
     
     # Step 1: LLM-guided retrieval
     for iteration in range(max_iterations):
@@ -112,7 +111,7 @@ def retrieve_papers(topic: str, client, model_name: str,
         )
         
         try:
-            response = _call_llm(client, model_name, prompt)
+            response = _call_llm_openai(client, model_name, prompt)
             action = response.strip()
             
             if action == "DONE":
@@ -140,7 +139,6 @@ def retrieve_papers(topic: str, client, model_name: str,
             
         except Exception as e:
             print(f"  Error on iteration {iteration+1}: {e}")
-            # Continue with next iteration
             continue
     
     papers_list = list(all_papers.values())
@@ -148,7 +146,7 @@ def retrieve_papers(topic: str, client, model_name: str,
     
     # Step 2: Score papers
     print(f"\n[Paper Scoring] Scoring papers for relevance...")
-    scored_papers = _score_papers(papers_list, topic, client, model_name)
+    scored_papers = _score_papers_openai(papers_list, topic, client, model_name)
     
     # Step 3: Filter and sort
     filtered_papers = [(paper, score) for paper, score in scored_papers if score >= min_score]
@@ -165,28 +163,21 @@ def retrieve_papers(topic: str, client, model_name: str,
 
 
 # ============================================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (OpenAI-specific)
 # ============================================================================
 
-def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 1024) -> str:
-    """Call the LLM and return response text."""
-    response = client.messages.create(
+def _call_llm_openai(client, model_name: str, prompt: str, max_tokens: int = 1024) -> str:
+    """Call OpenAI LLM and return response text."""
+    response = client.chat.completions.create(
         model=model_name,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text
+    return response.choices[0].message.content
 
 
 def _parse_action(action_str: str) -> Optional[Tuple[str, str]]:
-    """
-    Parse action string into (function_name, argument).
-    
-    Examples:
-        KeywordQuery("deep learning") -> ("KeywordQuery", "deep learning")
-        GetReferences("abc123") -> ("GetReferences", "abc123")
-    """
-    # Match function_name("argument")
+    """Parse action string into (function_name, argument)."""
     match = re.match(r'(\w+)\(["\']([^"\']+)["\']\)', action_str.strip())
     if match:
         return match.group(1), match.group(2)
@@ -224,13 +215,11 @@ def _build_history_string(action_history: List[Dict], max_actions: int = 5) -> s
     if not action_history:
         return "No actions yet."
     
-    # Show only recent actions
     recent = action_history[-max_actions:]
     lines = []
     
     for i, entry in enumerate(recent, start=len(action_history)-len(recent)+1):
         action = entry['action']
-        # Truncate long actions
         if len(action) > 60:
             action = action[:57] + "..."
         lines.append(f"{i}. {action} -> {entry['papers_found']} found, {entry['new_papers']} new")
@@ -238,33 +227,26 @@ def _build_history_string(action_history: List[Dict], max_actions: int = 5) -> s
     return "\n".join(lines)
 
 
-def _score_papers(papers: List[Paper], topic: str, client, model_name: str) -> List[Tuple[Paper, int]]:
-    """
-    Score papers for relevance using LLM.
-    
-    Returns:
-        List of (Paper, score) tuples
-    """
+def _score_papers_openai(papers: List[Paper], topic: str, client, model_name: str) -> List[Tuple[Paper, int]]:
+    """Score papers for relevance using OpenAI LLM."""
     scored_papers = []
     
     for i, paper in enumerate(papers):
         if (i + 1) % 10 == 0:
             print(f"  Scored {i+1}/{len(papers)} papers...")
         
-        # Skip papers without abstracts
         if not paper.abstract or len(paper.abstract.strip()) < 50:
             scored_papers.append((paper, 0))
             continue
         
-        # Score the paper
         prompt = PAPER_SCORING_PROMPT.format(
             topic=topic,
             title=paper.title,
-            abstract=paper.abstract[:1000]  # Limit abstract length
+            abstract=paper.abstract[:1000]
         )
         
         try:
-            response = _call_llm(client, model_name, prompt, max_tokens=10)
+            response = _call_llm_openai(client, model_name, prompt, max_tokens=10)
             score = _extract_score(response)
             scored_papers.append((paper, score))
         except Exception as e:
@@ -277,7 +259,6 @@ def _score_papers(papers: List[Paper], topic: str, client, model_name: str) -> L
 
 def _extract_score(response: str) -> int:
     """Extract integer score from LLM response."""
-    # Look for first integer 1-10
     match = re.search(r'\b([1-9]|10)\b', response.strip())
     if match:
         return int(match.group(1))
@@ -285,26 +266,15 @@ def _extract_score(response: str) -> int:
 
 
 # ============================================================================
-# UTILITY FUNCTIONS (keeping existing ones)
+# UTILITY FUNCTIONS
 # ============================================================================
 
 def build_rag_context(papers: List[Paper], max_papers: int = 10) -> str:
-    """
-    Build RAG context from retrieved papers for LLM prompting.
-    
-    Args:
-        papers: List of Paper objects
-        max_papers: Maximum number of papers to include in context
-        
-    Returns:
-        Formatted context string for LLM
-    """
+    """Build RAG context from retrieved papers for LLM prompting."""
     if not papers:
         return ""
     
-    # Limit to max_papers
     selected_papers = papers[:max_papers]
-    
     context_parts = ["Retrieved relevant research papers:\n"]
     
     for i, paper in enumerate(selected_papers, 1):
@@ -320,52 +290,9 @@ def build_rag_context(papers: List[Paper], max_papers: int = 10) -> str:
             context_parts.append(f"Authors: {authors_str}")
         
         if paper.abstract:
-            # Truncate very long abstracts
             abstract = paper.abstract[:500] + "..." if len(paper.abstract) > 500 else paper.abstract
             context_parts.append(f"Abstract: {abstract}")
         
-        context_parts.append("")  # Empty line between papers
+        context_parts.append("")
     
     return "\n".join(context_parts)
-
-
-def retrieve_diverse_papers(queries: List[str], papers_per_query: int = 20) -> List[Paper]:
-    """
-    Retrieve papers from multiple queries to get diverse coverage.
-    
-    Args:
-        queries: List of search query strings
-        papers_per_query: Number of papers to retrieve per query
-        
-    Returns:
-        Combined list of Paper objects (may contain duplicates)
-    """
-    client = SemanticScholarClient()
-    all_papers = []
-    
-    for query in queries:
-        papers = client.KeywordQuery(query, limit=papers_per_query)
-        all_papers.extend(papers)
-    
-    return all_papers
-
-
-def deduplicate_papers(papers: List[Paper]) -> List[Paper]:
-    """
-    Remove duplicate papers based on paper_id.
-    
-    Args:
-        papers: List of Paper objects
-        
-    Returns:
-        Deduplicated list of Paper objects
-    """
-    seen_ids = set()
-    unique_papers = []
-    
-    for paper in papers:
-        if paper.paper_id not in seen_ids:
-            seen_ids.add(paper.paper_id)
-            unique_papers.append(paper)
-    
-    return unique_papers
