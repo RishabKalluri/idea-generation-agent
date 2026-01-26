@@ -1,0 +1,5 @@
+anthropic
+sentence-transformers
+requests
+numpy
+tqdm
