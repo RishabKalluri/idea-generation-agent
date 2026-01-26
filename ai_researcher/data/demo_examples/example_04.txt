@@ -1,0 +1,11 @@
+Title: Parallel Exploration of Reasoning Paths
+
+Problem: Complex reasoning tasks require exploring multiple solution approaches, but standard autoregressive generation commits to a single path.
+
+Existing Methods: Chain-of-thought prompting helps but still follows a linear reasoning path that may lead to dead ends.
+
+Motivation: Human problem-solving often involves considering multiple approaches simultaneously and backtracking when one fails. Allowing LLMs to explore multiple reasoning branches in parallel can find better solutions.
+
+Proposed Method: Given a complex problem, generate multiple initial reasoning steps representing different approaches. Expand each branch by generating subsequent reasoning steps. Evaluate branches using the model's own assessment of progress and correctness. Prune unpromising branches and expand promising ones. Return the best complete solution found.
+
+Experiment Plan: Test on mathematical reasoning, planning tasks, and puzzle-solving benchmarks. Compare against chain-of-thought and self-consistency methods. Analyze the trade-off between exploration breadth and computational cost.

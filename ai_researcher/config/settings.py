@@ -14,7 +14,7 @@ MODEL_NAME = "claude-sonnet-4-20250514"  # For Anthropic
 OPENAI_MODEL_NAME = "gpt-4"  # For OpenAI (or "gpt-3.5-turbo" for cheaper/faster)
 
 # Idea Generation Parameters
-NUM_SEED_IDEAS = 4000
+NUM_SEED_IDEAS = 100
 
 # Deduplication Settings
 SIMILARITY_THRESHOLD = 0.8
