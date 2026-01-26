@@ -1,0 +1,21 @@
+Title:
+According-To Prompting for Grounded Generation
+
+Problem:
+Large language models frequently generate claims without proper attribution, making it difficult to verify factual accuracy and leading to hallucinations that blend true and false information seamlessly.
+
+Existing Methods:
+Retrieval-augmented generation provides source documents but doesn't ensure the model properly attributes its claims to specific sources. Post-hoc citation methods add references after generation but may cite documents that don't actually support the claims made.
+
+Motivation:
+By explicitly prompting the model to frame its responses as attributed claims (i.e., "According to [source], [claim]"), we can encourage more faithful grounding in provided evidence and make it easier to verify which claims come from which sources.
+
+Proposed Method:
+According-To Prompting structures generation around explicit attribution:
+(1) Retrieve Evidence: Given a query, retrieve relevant documents or passages that may contain the answer.
+(2) Generate with Attribution: Prompt the model to generate responses where each factual claim is explicitly prefaced with "According to [source]..." forcing the model to tie claims to specific retrieved evidence.
+(3) Verify Attribution: For each attributed claim, verify that the cited source actually contains supporting information; claims without valid attribution are flagged as potentially unreliable.
+This approach makes hallucinations more detectable by requiring explicit grounding for each claim.
+
+Experiment Plan:
+Evaluate on knowledge-intensive QA datasets and fact verification tasks. Compare against standard RAG and post-hoc citation methods. Measure both answer accuracy and attribution faithfulness (whether cited sources actually support the claims).

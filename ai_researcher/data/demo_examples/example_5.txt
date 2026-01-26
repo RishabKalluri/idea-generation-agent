@@ -1,0 +1,21 @@
+Title:
+Step-Back Prompting for Deep Reasoning
+
+Problem:
+Large language models often struggle with complex reasoning tasks that require understanding underlying principles or concepts, instead getting lost in surface-level details and making errors in multi-step reasoning.
+
+Existing Methods:
+Chain-of-thought prompting improves reasoning by generating intermediate steps, but it still operates at the level of the specific problem without first grounding in higher-level principles. This can lead to reasoning errors when problems require deeper conceptual understanding.
+
+Motivation:
+When humans face complex problems, they often take a step back to consider the broader context, underlying principles, or relevant abstractions before diving into specifics. This abstraction-first approach helps avoid getting trapped by surface-level complexity.
+
+Proposed Method:
+Step-Back Prompting guides reasoning through abstraction:
+(1) Step Back: Given a complex question, first prompt the LLM to identify and answer a higher-level "step-back question" that asks about the underlying principles, concepts, or general approach relevant to solving the problem.
+(2) Retrieve Principles: The model generates or retrieves the fundamental knowledge needed based on the step-back question.
+(3) Reason with Principles: Using the abstracted principles as grounding, the model then reasons through the original specific question with this conceptual foundation.
+This approach ensures reasoning is anchored in correct high-level understanding before addressing details.
+
+Experiment Plan:
+Evaluate on STEM reasoning tasks (physics, chemistry), knowledge-intensive QA, and multi-hop reasoning benchmarks. Compare against direct answering, chain-of-thought, and retrieval-augmented approaches. Measure both accuracy and reasoning coherence.

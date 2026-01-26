@@ -1,0 +1,21 @@
+Title:
+Analogical Prompting for Complex Reasoning
+
+Problem:
+Complex reasoning tasks require relevant examples to guide the model, but manually crafting high-quality exemplars for each new problem is time-consuming and may not transfer well across different problem types.
+
+Existing Methods:
+Few-shot prompting with manually curated examples is effective but requires significant human effort. Chain-of-thought prompting helps but the reasoning quality depends heavily on example selection. Zero-shot approaches avoid example curation but often underperform.
+
+Motivation:
+Humans often solve new problems by recalling and adapting solutions from similar problems they've encountered before. Rather than relying on fixed examples, we can prompt LLMs to self-generate relevant exemplars by recalling problems analogous to the given query and their solutions.
+
+Proposed Method:
+Analogical Prompting guides the LLM to solve problems through three steps:
+(1) Recall Relevant Problems: Given a new problem, prompt the LLM to recall or generate similar problems it has knowledge about, focusing on problems with analogous structure or requiring similar reasoning patterns.
+(2) Generate Exemplar Solutions: For each recalled problem, have the LLM generate a detailed solution demonstrating the relevant reasoning process.
+(3) Solve Target Problem: Using the self-generated exemplars as guidance, solve the original problem by adapting the reasoning patterns demonstrated in the analogous examples.
+This approach allows the model to dynamically tailor its examples to each specific problem.
+
+Experiment Plan:
+Evaluate on mathematical reasoning benchmarks (GSM8K, MATH), code generation tasks, and logical reasoning problems. Compare against zero-shot, few-shot with fixed examples, and chain-of-thought prompting. Analyze the quality and relevance of self-generated examples.

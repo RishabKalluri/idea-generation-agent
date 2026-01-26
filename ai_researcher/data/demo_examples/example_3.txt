@@ -1,0 +1,20 @@
+Title:
+System 2 Attention for Robust Reasoning
+
+Problem:
+Large language models can be easily distracted by irrelevant or misleading information in the input context, leading to incorrect reasoning and biased outputs even when the model has the capability to answer correctly.
+
+Existing Methods:
+Standard attention mechanisms in transformers attend to all tokens in the context, including irrelevant or potentially misleading information. Existing solutions involve fine-tuning on curated data or using retrieval to select relevant context, but these approaches are expensive and don't address the fundamental attention problem.
+
+Motivation:
+Inspired by dual-process theory from cognitive psychology—where System 1 is fast and automatic while System 2 is slow and deliberate—we propose that LLMs can use a deliberate, effortful process to regenerate the context by removing irrelevant information before reasoning about it.
+
+Proposed Method:
+System 2 Attention (S2A) works in two stages:
+(1) Context Regeneration: Given the original context and query, prompt the LLM to regenerate the context by extracting only the information relevant to answering the query, explicitly removing opinionated, biased, or irrelevant portions.
+(2) Final Response: Use the regenerated, cleaned context to answer the original query.
+This approach allows the model to deliberately decide what to attend to rather than relying on soft attention weights that may be swayed by spurious correlations.
+
+Experiment Plan:
+Evaluate on tasks where context contains sycophantic, irrelevant, or misleading information, including modified versions of TriviaQA and opinion-based QA. Compare against standard prompting and chain-of-thought. Measure both factual accuracy and resistance to misleading context.

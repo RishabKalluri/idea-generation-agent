@@ -1,0 +1,22 @@
+Title:
+Chain-of-Verification Prompting
+
+Problem:
+Generation of plausible yet incorrect factual information, termed hallucination, is an unsolved issue in large language models.
+
+Existing Methods:
+A majority of the methods for reducing hallucination can be divided into roughly three categories: training-time correction; generation-time correction; and via augmentation (tool-use).
+
+Motivation:
+A key observation is that large language models, when suitably prompted, can both generate and execute a plan of how to verify themselves in order to check their own work, and finally incorporate this analysis into an improved response.
+
+Proposed Method:
+Our overall process, which we call Chain-of-Verification (CoVe), thus performs four core steps:
+(1) Generate Baseline Response: Given a query, generate the response using the LLM.
+(2) Plan Verifications: Given both query and baseline response, generate a list of verification questions that could help to self-analyze if there are any mistakes in the original response.
+(3) Execute Verifications: Answer each verification question in turn, and hence check the answer against the original response to check for inconsistencies or mistakes.
+(4) Generate Final Verified Response: Given the discovered inconsistencies (if any), generate a revised response incorporating the verification results.
+Each of these steps is performed by prompting the same LLM in different ways to obtain the desired response.
+
+Experiment Plan:
+Compare with zero-shot prompting, Chain-of-Thought, and few-shot prompting on the MultiSpanQA dataset on closed-book QA and FactScore dataset on generating biographies.

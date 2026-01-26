@@ -1,0 +1,21 @@
+Title:
+Self-Refine: Iterative Refinement with Self-Feedback
+
+Problem:
+Large language models often produce outputs that are suboptimal on first attempt, containing errors, lacking clarity, or missing important aspects that could be improved through revision.
+
+Existing Methods:
+Current approaches to improving LLM outputs rely heavily on either human feedback for iterative refinement or training separate models (critics, reward models) which requires expensive data collection and training procedures.
+
+Motivation:
+Humans naturally improve their work through an iterative process of drafting, reflecting on their draft, and revising. We hypothesize that LLMs can similarly improve their own outputs by generating feedback on their initial response and using that feedback to refine the output, all without additional training or external feedback.
+
+Proposed Method:
+Self-Refine operates through an iterative loop with three main steps:
+(1) Initial Generation: The LLM generates an initial output for a given task.
+(2) Feedback: The same LLM is prompted to provide specific, actionable feedback on the initial output, identifying weaknesses and areas for improvement.
+(3) Refine: The LLM takes the original output and the feedback to generate an improved version.
+This feedback-refine cycle repeats until the model determines no further improvements are needed or a maximum number of iterations is reached. Importantly, this requires no additional training and works across diverse tasks.
+
+Experiment Plan:
+Evaluate on seven diverse tasks including dialogue response generation, code optimization, math reasoning, and sentiment reversal. Compare against direct generation and existing refinement approaches. Measure quality improvement across iterations and analyze computational cost trade-offs.
