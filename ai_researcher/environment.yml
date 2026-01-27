@@ -1,0 +1,49 @@
+# Conda environment for AI Research Idea Generation Pipeline
+# 
+# Create environment:
+#   conda env create -f environment.yml
+#
+# Activate environment:
+#   conda activate ai-researcher
+#
+# Update environment:
+#   conda env update -f environment.yml --prune
+#
+# Export current environment:
+#   conda env export > environment.yml
+
+name: ai-researcher
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python version
+  - python=3.10
+  
+  # Core dependencies
+  - pip
+  - numpy>=1.21
+  - requests>=2.28
+  - tqdm>=4.64
+  
+  # PyTorch with CUDA support (GPU cluster - NVIDIA A40, CUDA 13.1 driver)
+  - pytorch>=2.1
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1  # Compatible with CUDA 13.1 driver
+  
+  # Sentence transformers for embeddings (will use GPU automatically)
+  - sentence-transformers>=2.2
+  
+  # Testing
+  - pytest>=7.0
+  - pytest-cov
+  
+  # Pip-only packages
+  - pip:
+    - openai>=1.0
+    - anthropic>=0.18  # Optional, for Anthropic API support

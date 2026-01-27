@@ -1,104 +1,195 @@
 # AI Research Idea Generation Pipeline
 
-An automated pipeline for generating, filtering, and ranking novel AI research ideas using LLMs and retrieval-augmented generation (RAG).
+An automated pipeline for generating, filtering, and ranking AI research ideas using LLMs. Based on the methodology from "Can LLMs Generate Novel Research Ideas?"
+
+## Quick Start
+
+```bash
+# 1. Setup conda environment
+export PATH="/opt/conda/bin:$PATH"
+conda env create -f environment.yml
+conda activate ai-researcher
+
+# 2. Set your API key
+export OPENAI_API_KEY='your-key-here'
+
+# 3. Run a test
+python main.py --topic factuality --lite
+
+# 4. Run full pipeline
+python main.py --topic factuality
+```
 
 ## Project Structure
 
 ```
 ai_researcher/
+├── main.py                 # Main entry point
+├── environment.yml         # Conda environment (GPU-enabled)
+├── requirements.txt        # Pip dependencies (alternative)
+├── setup_env.sh           # Setup helper script
+│
 ├── config/
-│   ├── __init__.py
-│   └── settings.py          # API keys, model settings, hyperparameters
+│   └── settings.py        # Configuration & hyperparameters
+│
 ├── modules/
-│   ├── __init__.py
-│   ├── paper_retrieval.py   # Semantic Scholar RAG
-│   ├── idea_generation.py   # Seed idea and full proposal generation
-│   ├── deduplication.py     # Embedding-based deduplication
-│   ├── idea_filtering.py    # Novelty and feasibility checks
-│   ├── idea_ranking.py      # Swiss system tournament ranking
-│   └── style_normalization.py # Style standardization
-├── prompts/
-│   ├── __init__.py
-│   └── templates.py         # All LLM prompt templates
-├── data/
-│   └── demo_examples/       # Demonstration examples for few-shot prompting
+│   ├── paper_retrieval.py     # Semantic Scholar RAG
+│   ├── idea_generation.py     # Seed ideas & proposal expansion
+│   ├── deduplication.py       # Embedding-based deduplication
+│   ├── idea_filtering.py      # Novelty & feasibility checks
+│   ├── idea_ranking.py        # Swiss tournament ranking
+│   └── style_normalization.py # Consistent formatting
+│
 ├── utils/
-│   ├── __init__.py
-│   ├── api_client.py        # Wrapper for Claude/OpenAI API calls
-│   └── semantic_scholar.py  # Semantic Scholar API wrapper
-├── main.py                  # Main orchestration script
-├── requirements.txt
-└── README.md
+│   ├── semantic_scholar.py    # Semantic Scholar API client
+│   └── api_client.py          # LLM API utilities
+│
+├── data/demo_examples/        # Few-shot examples for prompting
+│
+├── prompts/
+│   └── templates.py           # Prompt templates
+│
+└── tests/
+    └── test_pipeline.py       # Comprehensive tests
 ```
-
-## Configuration
-
-The pipeline is configured through `config/settings.py` with the following parameters:
-
-### API Keys
-- `ANTHROPIC_API_KEY`: Required for Claude API access
-- `SEMANTIC_SCHOLAR_API_KEY`: Optional, but recommended for higher rate limits
-
-### Model Settings
-- `MODEL_NAME`: "claude-sonnet-4-20250514"
-
-### Pipeline Parameters
-- `NUM_SEED_IDEAS`: 4000 - Number of initial seed ideas to generate
-- `SIMILARITY_THRESHOLD`: 0.8 - Threshold for deduplication
-- `NUM_RETRIEVED_PAPERS`: 120 - Total papers to retrieve
-- `TOP_K_PAPERS_PER_QUERY`: 20 - Papers per retrieval query
-- `NUM_DEMO_EXAMPLES`: 6 - Examples for few-shot prompting
-- `RAG_APPLICATION_RATE`: 0.5 - Rate of applying RAG to proposals
-- `NUM_RANKING_ROUNDS`: 5 - Swiss tournament rounds
-
-## Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-## Dependencies
-
-- **anthropic**: Claude API client
-- **sentence-transformers**: Embeddings (all-MiniLM-L6-v2 model)
-- **requests**: Semantic Scholar API calls
-- **numpy**: Similarity calculations
-- **tqdm**: Progress bars
 
 ## Usage
 
-Set your API keys as environment variables:
+### Command Line
 
 ```bash
-export ANTHROPIC_API_KEY="your-key-here"
-export SEMANTIC_SCHOLAR_API_KEY="your-key-here"  # Optional
+# Lite mode (quick test, ~$1-2)
+python main.py --topic factuality --lite
+
+# Full pipeline (~$50-80 with gpt-4o)
+python main.py --topic factuality
+
+# Custom parameters
+python main.py --topic math --num_ideas 100 --output_dir ./results
+
+# Skip paper retrieval (use cached papers)
+python main.py --topic coding --skip_retrieval --papers_file papers.json
 ```
 
-Run the pipeline:
+### Available Topics
+
+| Topic | Description |
+|-------|-------------|
+| `bias` | Reduce social biases and stereotypes |
+| `coding` | Improve code generation |
+| `safety` | Improve robustness, security, privacy |
+| `multilingual` | Multilingual/low-resource languages |
+| `factuality` | Reduce hallucination |
+| `math` | Mathematical problem solving |
+| `uncertainty` | Quantify uncertainty/calibration |
+
+### Pipeline Stages
+
+1. **Paper Retrieval** - RAG from Semantic Scholar (~120 papers)
+2. **Seed Idea Generation** - Generate 4000 ideas with few-shot prompting
+3. **Deduplication** - Embedding-based duplicate removal (~200 unique)
+4. **Proposal Expansion** - Expand to detailed proposals
+5. **Filtering** - Novelty and feasibility checks
+6. **Ranking** - Swiss tournament pairwise comparison
+7. **Style Normalization** - Consistent academic formatting
+8. **Save Results** - Timestamped output directory
+
+## Configuration
+
+Edit `config/settings.py`:
+
+```python
+# API Keys (use environment variables)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SEMANTIC_SCHOLAR_API_KEY = os.getenv("SEMANTIC_SCHOLAR_API_KEY")  # Optional
+
+# Model
+OPENAI_MODEL_NAME = "gpt-4o"  # or "gpt-4o-mini" for cheaper runs
+
+# Hyperparameters
+NUM_SEED_IDEAS = 4000          # Ideas to generate
+SIMILARITY_THRESHOLD = 0.8     # Deduplication threshold
+NUM_RETRIEVED_PAPERS = 120     # Papers for RAG
+RAG_APPLICATION_RATE = 0.5     # % of ideas using RAG
+NUM_RANKING_ROUNDS = 5         # Swiss tournament rounds
+```
+
+## Output
+
+Results are saved to `outputs/<topic>/<timestamp>/`:
+
+```
+outputs/factuality/20260127_143052/
+├── summary.json                    # Run metadata
+├── rankings.txt                    # Full ranked list
+├── top_proposals_normalized.txt    # Top 50 formatted proposals
+└── intermediate/
+    ├── papers.json                 # Retrieved papers
+    ├── seed_ideas.txt              # All generated ideas
+    ├── unique_ideas.txt            # After deduplication
+    ├── full_proposals.txt          # Expanded proposals
+    └── filtered_proposals.txt      # After filtering
+```
+
+## Testing
 
 ```bash
-python main.py
+# Run all tests
+python tests/test_pipeline.py
+
+# With pytest (more verbose)
+pytest tests/test_pipeline.py -v
 ```
 
-## Pipeline Stages
+## Cost Estimates
 
-1. **Seed Idea Generation**: Generate initial research ideas
-2. **Paper Retrieval**: Fetch relevant papers from Semantic Scholar
-3. **Full Proposal Generation**: Expand seeds into detailed proposals with RAG
-4. **Deduplication**: Remove similar ideas using embeddings
-5. **Filtering**: Check novelty and feasibility
-6. **Ranking**: Swiss tournament for pairwise comparison
-7. **Style Normalization**: Standardize writing style
+| Mode | Ideas | Tokens | GPT-4o Cost |
+|------|-------|--------|-------------|
+| Lite | 10 | ~50K | ~$1-2 |
+| Medium | 100 | ~500K | ~$5-10 |
+| Full | 4000 | ~10M | ~$50-80 |
 
-## Module Descriptions
+## GPU Cluster (SLURM)
 
-- **paper_retrieval.py**: Interfaces with Semantic Scholar API to retrieve relevant academic papers
-- **idea_generation.py**: Generates both seed ideas and full research proposals using LLMs
-- **deduplication.py**: Uses sentence transformers to compute embeddings and remove duplicate ideas
-- **idea_filtering.py**: Evaluates ideas for novelty (vs. existing work) and feasibility
-- **idea_ranking.py**: Implements Swiss system tournament for ranking ideas through pairwise comparisons
-- **style_normalization.py**: Ensures consistent writing style across all generated ideas
+```bash
+# Create job script
+cat > run_job.sh << 'EOF'
+#!/bin/bash
+#SBATCH --job-name=ai-researcher
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --mem=32G
+#SBATCH --time=4:00:00
 
-## Notes
+source /opt/conda/etc/profile.d/conda.sh
+conda activate ai-researcher
+export OPENAI_API_KEY='your-key'
 
-This is a skeleton structure. Implementation details for each module will be added separately.
+python main.py --topic factuality
+EOF
+
+# Submit
+sbatch run_job.sh
+```
+
+## API Keys
+
+### OpenAI (Required)
+Get from: https://platform.openai.com/api-keys
+
+```bash
+export OPENAI_API_KEY='sk-...'
+```
+
+### Semantic Scholar (Optional but Recommended)
+Get from: https://www.semanticscholar.org/product/api
+
+```bash
+export SEMANTIC_SCHOLAR_API_KEY='...'
+```
+
+Without an API key, you're limited to ~100 requests/5 minutes.
+
+## License
+
+MIT

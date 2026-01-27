@@ -6,9 +6,23 @@ to provide context for idea generation. Uses LLM-guided retrieval
 to intelligently search for papers.
 """
 
+import os
 import re
+import importlib.util
 from typing import List, Dict, Tuple, Optional
-from utils import SemanticScholarClient, Paper
+
+# Load SemanticScholar directly to avoid anthropic dependency
+def _load_semantic_scholar():
+    """Load SemanticScholar module without triggering anthropic import."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    ss_path = os.path.join(current_dir, "..", "utils", "semantic_scholar.py")
+    
+    spec = importlib.util.spec_from_file_location("semantic_scholar_direct", ss_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SemanticScholarClient, module.Paper
+
+SemanticScholarClient, Paper = _load_semantic_scholar()
 
 
 # ============================================================================
@@ -169,13 +183,13 @@ def retrieve_papers(topic: str, client, model_name: str,
 # ============================================================================
 
 def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 1024) -> str:
-    """Call the LLM and return response text."""
-    response = client.messages.create(
+    """Call the LLM and return response text. Supports OpenAI API."""
+    response = client.chat.completions.create(
         model=model_name,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text
+    return response.choices[0].message.content
 
 
 def _parse_action(action_str: str) -> Optional[Tuple[str, str]]:
