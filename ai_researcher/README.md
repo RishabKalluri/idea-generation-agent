@@ -69,7 +69,32 @@ python main.py --topic math --num_ideas 100 --output_dir ./results
 
 # Skip paper retrieval (use cached papers)
 python main.py --topic coding --skip_retrieval --papers_file papers.json
+
+# Use a different retrieval method
+python main.py --topic factuality --retrieval_method tavily
+
+# Enable human-in-the-loop feedback
+python main.py --topic factuality --human_feedback
+
+# Clear accumulated feedback before running
+python main.py --topic factuality --clear_feedback
 ```
+
+### CLI Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--topic` | string | *required* | Research topic (`bias`, `coding`, `safety`, `multilingual`, `factuality`, `math`, `uncertainty`) |
+| `--output_dir` | string | `outputs` | Directory to save results |
+| `--num_ideas` | int | from settings | Number of seed ideas to generate |
+| `--num_papers` | int | from settings | Number of papers to retrieve |
+| `--model` | string | from settings | Override the LLM model name |
+| `--lite` | flag | off | Quick test run (10 ideas, skips filtering/ranking) |
+| `--skip_retrieval` | flag | off | Skip paper retrieval, load from `--papers_file` instead |
+| `--papers_file` | string | none | Path to pre-retrieved papers JSON (use with `--skip_retrieval`) |
+| `--retrieval_method` | string | from settings | Paper retrieval strategy: `llm_guided`, `keyword`, or `tavily` |
+| `--human_feedback` | flag | off | Pause after results to collect human feedback |
+| `--clear_feedback` | flag | off | Clear all accumulated human feedback before running |
 
 ### Available Topics
 
