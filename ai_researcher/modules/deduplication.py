@@ -216,6 +216,87 @@ def deduplicate_ideas(
     return kept_ideas
 
 
+def deduplicate_to_target(
+    ideas: List,
+    target_count: int = None,
+    target_percent: float = 0.05,
+    min_threshold: float = 0.5,
+    max_threshold: float = 0.9,
+    show_progress: bool = True
+) -> List:
+    """
+    Deduplicate ideas to reach approximately a target count or percentage.
+    
+    Uses binary search to find the right threshold that yields the target.
+    
+    Args:
+        ideas: List of SeedIdea objects
+        target_count: Target number of ideas (overrides target_percent if set)
+        target_percent: Target percentage to keep (default 5%)
+        min_threshold: Minimum similarity threshold to try
+        max_threshold: Maximum similarity threshold to try
+        show_progress: Whether to show progress
+    
+    Returns:
+        List of deduplicated ideas close to the target count
+    """
+    if len(ideas) == 0:
+        return []
+    
+    # Determine target count
+    if target_count is None:
+        target_count = max(1, int(len(ideas) * target_percent))
+    
+    print(f"\n[Deduplication] Targeting ~{target_count} ideas ({target_count/len(ideas)*100:.1f}%)")
+    
+    # Compute embeddings once
+    embeddings = embed_ideas(ideas)
+    
+    def count_with_threshold(threshold: float) -> int:
+        """Count how many ideas survive with given threshold."""
+        kept_embeddings = [embeddings[0]]
+        count = 1
+        
+        for i in range(1, len(ideas)):
+            is_duplicate = False
+            for kept_emb in kept_embeddings:
+                if cosine_similarity(embeddings[i], kept_emb) > threshold:
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                kept_embeddings.append(embeddings[i])
+                count += 1
+        return count
+    
+    # Binary search for right threshold
+    low, high = min_threshold, max_threshold
+    best_threshold = (low + high) / 2
+    best_count = count_with_threshold(best_threshold)
+    
+    for _ in range(10):  # Max 10 iterations
+        mid = (low + high) / 2
+        count = count_with_threshold(mid)
+        
+        if abs(count - target_count) < abs(best_count - target_count):
+            best_threshold = mid
+            best_count = count
+        
+        if count > target_count:
+            # Too many kept, need lower threshold (more aggressive)
+            high = mid
+        else:
+            # Too few kept, need higher threshold (less aggressive)
+            low = mid
+        
+        if abs(count - target_count) <= max(1, target_count * 0.1):
+            break  # Close enough (within 10%)
+    
+    print(f"  Found threshold: {best_threshold:.3f} → ~{best_count} ideas")
+    
+    # Run actual deduplication with best threshold
+    return deduplicate_ideas(ideas, threshold=best_threshold, show_progress=show_progress)
+
+
 def deduplicate_ideas_with_info(
     ideas: List,
     threshold: float = 0.8

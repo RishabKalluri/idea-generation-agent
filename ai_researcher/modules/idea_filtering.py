@@ -191,8 +191,12 @@ def check_novelty_against_paper(
         paper_abstract=paper.abstract[:1000] if paper.abstract else "No abstract available"
     )
     
-    response = _call_llm(client, model_name, prompt, max_tokens=100)
-    response = response.strip().upper()
+    response = _call_llm(client, model_name, prompt, max_tokens=256)
+    response = response.strip().upper() if response else ""
+    
+    # If empty response, default to DIFFERENT (keep the proposal)
+    if not response:
+        return True, "Unable to determine (empty response)"
     
     is_different = response.startswith("DIFFERENT")
     explanation = response.split("\n")[0] if "\n" in response else response
@@ -265,8 +269,12 @@ def _check_novelty_batch(
         papers_list=papers_list
     )
     
-    response = _call_llm(client, model_name, prompt, max_tokens=150)
-    response_upper = response.strip().upper()
+    response = _call_llm(client, model_name, prompt, max_tokens=512)
+    response_upper = response.strip().upper() if response else ""
+    
+    # If empty response, default to NOVEL (keep the proposal)
+    if not response_upper:
+        return True, "Unable to determine (empty response)"
     
     is_novel = response_upper.startswith("NOVEL") and "NOT_NOVEL" not in response_upper
     
@@ -330,8 +338,12 @@ Experiment Plan: {proposal.experiment_plan}"""
     
     prompt = FEASIBILITY_CHECK_PROMPT.format(proposal_text=proposal_text)
     
-    response = _call_llm(client, model_name, prompt, max_tokens=200)
-    response_upper = response.strip().upper()
+    response = _call_llm(client, model_name, prompt, max_tokens=512)
+    response_upper = response.strip().upper() if response else ""
+    
+    # If empty response, default to FEASIBLE (keep the proposal)
+    if not response_upper:
+        return True, "Unable to determine (empty response)"
     
     is_feasible = response_upper.startswith("FEASIBLE") and "NOT_FEASIBLE" not in response_upper
     
@@ -428,11 +440,14 @@ def filter_proposals(
     # Print summary
     print(f"\n[Filtering] Complete!")
     print(f"  Total: {stats['total']}")
-    print(f"  Passed: {stats['passed']} ({stats['passed']/stats['total']*100:.1f}%)")
-    if check_novelty_flag:
-        print(f"  Failed novelty: {stats['failed_novelty']} ({stats['failed_novelty']/stats['total']*100:.1f}%)")
-    if check_feasibility_flag:
-        print(f"  Failed feasibility: {stats['failed_feasibility']} ({stats['failed_feasibility']/stats['total']*100:.1f}%)")
+    if stats['total'] > 0:
+        print(f"  Passed: {stats['passed']} ({stats['passed']/stats['total']*100:.1f}%)")
+        if check_novelty_flag:
+            print(f"  Failed novelty: {stats['failed_novelty']} ({stats['failed_novelty']/stats['total']*100:.1f}%)")
+        if check_feasibility_flag:
+            print(f"  Failed feasibility: {stats['failed_feasibility']} ({stats['failed_feasibility']/stats['total']*100:.1f}%)")
+    else:
+        print(f"  Passed: 0 (no proposals to filter)")
     
     return filtered, stats
 
@@ -441,14 +456,34 @@ def filter_proposals(
 # HELPER FUNCTIONS
 # ============================================================================
 
-def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 256) -> str:
-    """Call OpenAI LLM and return response text."""
+def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 512) -> str:
+    """Call OpenAI LLM and return response text. Injects human feedback if available."""
+    messages = []
+    feedback = _get_human_feedback()
+    if feedback:
+        messages.append({"role": "system", "content": feedback})
+    messages.append({"role": "user", "content": prompt})
     response = client.chat.completions.create(
         model=model_name,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
+        max_completion_tokens=max_tokens,
+        messages=messages
     )
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content if content is not None else ""
+
+
+def _get_human_feedback() -> str:
+    """Load formatted human feedback if available."""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        fb_path = os.path.join(current_dir, "..", "utils", "feedback.py")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("feedback", fb_path)
+        fb_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fb_module)
+        return fb_module.get_formatted_feedback()
+    except Exception:
+        return ""
 
 
 def save_filtering_report(

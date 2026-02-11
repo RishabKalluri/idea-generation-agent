@@ -1,0 +1,13 @@
+# Human-in-the-loop feedback (local to each user, not shared)
+config/human_feedback.txt
+
+# Environment / secrets
+config/.env
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Pipeline run outputs (regenerated per run)
+outputs/

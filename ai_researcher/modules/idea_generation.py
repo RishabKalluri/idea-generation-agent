@@ -534,8 +534,8 @@ def generate_seed_ideas(
         )
         
         try:
-            # Call LLM
-            response = _call_llm_openai(client, model_name, prompt, max_tokens=1024)
+            # Call LLM - use higher token limit for reasoning models
+            response = _call_llm_openai(client, model_name, prompt, max_tokens=2048)
             
             # Parse response
             idea = parse_seed_idea(response)
@@ -570,14 +570,34 @@ def generate_seed_ideas(
     return generated_ideas
 
 
-def _call_llm_openai(client, model_name: str, prompt: str, max_tokens: int = 1024) -> str:
-    """Call OpenAI LLM and return response text."""
+def _call_llm_openai(client, model_name: str, prompt: str, max_tokens: int = 2048) -> str:
+    """Call OpenAI LLM and return response text. Injects human feedback if available."""
+    messages = []
+    feedback = _get_human_feedback()
+    if feedback:
+        messages.append({"role": "system", "content": feedback})
+    messages.append({"role": "user", "content": prompt})
     response = client.chat.completions.create(
         model=model_name,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
+        max_completion_tokens=max_tokens,
+        messages=messages
     )
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content if content is not None else ""
+
+
+def _get_human_feedback() -> str:
+    """Load formatted human feedback if available."""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        fb_path = os.path.join(current_dir, "..", "utils", "feedback.py")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("feedback", fb_path)
+        fb_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fb_module)
+        return fb_module.get_formatted_feedback()
+    except Exception:
+        return ""
 
 
 # ============================================================================
@@ -634,8 +654,8 @@ def expand_to_full_proposal(
     )
     
     try:
-        # Call LLM with larger token limit for detailed proposal
-        response = _call_llm_openai(client, model_name, prompt, max_tokens=4096)
+        # Call LLM with larger token limit for detailed proposal (reasoning models need more)
+        response = _call_llm_openai(client, model_name, prompt, max_tokens=8192)
         
         # Parse response
         proposal = parse_full_proposal(response)

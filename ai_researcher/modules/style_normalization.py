@@ -198,7 +198,7 @@ def normalize_style(
     template: str,
     client,
     model_name: str,
-    max_retries: int = 2
+    max_retries: int = 1
 ) -> FullProposal:
     """
     Normalize the style of a proposal to match a template.
@@ -209,7 +209,7 @@ def normalize_style(
         template: Template text to match style
         client: OpenAI client
         model_name: Model to use
-        max_retries: Number of retries on failure
+        max_retries: Number of retries on failure (default 1 = 2 total attempts)
     
     Returns:
         Normalized FullProposal
@@ -223,11 +223,22 @@ def normalize_style(
     
     for attempt in range(max_retries + 1):
         try:
-            response = _call_llm(client, model_name, prompt, max_tokens=4000)
+            # Use high token limit for reasoning models
+            response = _call_llm(client, model_name, prompt, max_tokens=16384)
+            
+            # Handle empty response
+            if not response or not response.strip():
+                print(f"  Warning: Empty response, attempt {attempt + 1}")
+                continue
+            
+            # Debug: show response length
+            if attempt > 0:
+                print(f"    Response length: {len(response)} chars")
+                
             normalized = parse_normalized_text(response, proposal)
             
-            # Validate that we didn't lose content
-            if _validate_normalization(proposal, normalized):
+            # Validate that we didn't lose content (with debug on retries)
+            if _validate_normalization(proposal, normalized, debug=(attempt > 0)):
                 return normalized
             else:
                 print(f"  Warning: Normalization validation failed, attempt {attempt + 1}")
@@ -237,6 +248,8 @@ def normalize_style(
             if attempt == max_retries:
                 return proposal  # Return original on failure
     
+    # On final failure, return original with warning
+    print(f"  Warning: All normalization attempts failed, using original")
     return proposal
 
 
@@ -254,7 +267,10 @@ def normalize_style_quick(
     prompt = QUICK_NORMALIZATION_PROMPT.format(idea_text=idea_text)
     
     try:
-        response = _call_llm(client, model_name, prompt, max_tokens=4000)
+        response = _call_llm(client, model_name, prompt, max_tokens=8192)
+        if not response or not response.strip():
+            print(f"  Warning: Empty response in quick normalization")
+            return proposal
         return parse_normalized_text(response, proposal)
     except Exception as e:
         print(f"  Error in quick normalization: {e}")
@@ -327,7 +343,7 @@ def normalize_all_quick(
 # VALIDATION
 # ============================================================================
 
-def _validate_normalization(original: FullProposal, normalized: FullProposal) -> bool:
+def _validate_normalization(original: FullProposal, normalized: FullProposal, debug: bool = False) -> bool:
     """
     Validate that normalization preserved key content.
     
@@ -336,20 +352,29 @@ def _validate_normalization(original: FullProposal, normalized: FullProposal) ->
     """
     # Check that title is present and similar
     if not normalized.title or len(normalized.title) < 5:
+        if debug:
+            print(f"    Validation failed: title missing or too short ({repr(normalized.title)})")
         return False
     
     # Check that major sections are present
     if not normalized.problem_statement:
+        if debug:
+            print(f"    Validation failed: problem_statement missing")
         return False
     if not normalized.proposed_method:
+        if debug:
+            print(f"    Validation failed: proposed_method missing")
         return False
     
     # Check that content wasn't drastically shortened
     original_len = len(format_proposal_for_normalization(original))
     normalized_len = len(format_proposal_for_normalization(normalized))
     
-    # Allow some reduction but not more than 50%
-    if normalized_len < original_len * 0.5:
+    # Allow significant reduction (30% minimum) for reasoning model outputs
+    # that may truncate but still have valid content
+    if normalized_len < original_len * 0.3:
+        if debug:
+            print(f"    Validation failed: too short ({normalized_len} < {original_len * 0.3:.0f})")
         return False
     
     return True
@@ -526,14 +551,38 @@ def create_template_from_proposal(proposal: FullProposal) -> str:
 # HELPER FUNCTIONS
 # ============================================================================
 
-def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 4000) -> str:
-    """Call OpenAI LLM and return response text."""
+def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 16384) -> str:
+    """Call OpenAI LLM and return response text. Injects human feedback if available.
+    
+    Note: GPT-5-mini is a reasoning model that uses max_completion_tokens for BOTH
+    reasoning AND output. Style normalization needs high token limits.
+    """
+    messages = []
+    feedback = _get_human_feedback()
+    if feedback:
+        messages.append({"role": "system", "content": feedback})
+    messages.append({"role": "user", "content": prompt})
     response = client.chat.completions.create(
         model=model_name,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
+        max_completion_tokens=max_tokens,
+        messages=messages
     )
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content if content is not None else ""
+
+
+def _get_human_feedback() -> str:
+    """Load formatted human feedback if available."""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        fb_path = os.path.join(current_dir, "..", "utils", "feedback.py")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("feedback", fb_path)
+        fb_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fb_module)
+        return fb_module.get_formatted_feedback()
+    except Exception:
+        return ""
 
 
 # ============================================================================

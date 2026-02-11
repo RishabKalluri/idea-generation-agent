@@ -161,13 +161,13 @@ def pairwise_compare(
             problem_b=proposal_b.problem_statement[:300] if proposal_b.problem_statement else 'N/A',
             method_b=proposal_b.proposed_method[:500] if proposal_b.proposed_method else 'N/A'
         )
-        max_tokens = 300
+        max_tokens = 512
     else:
         prompt = PAIRWISE_COMPARISON_PROMPT.format(
             proposal_a=format_proposal_for_comparison(proposal_a),
             proposal_b=format_proposal_for_comparison(proposal_b)
         )
-        max_tokens = 50
+        max_tokens = 256
     
     response = _call_llm(client, model_name, prompt, max_tokens)
     response_text = response.strip()
@@ -538,14 +538,34 @@ def get_top_proposals(
 # HELPER FUNCTIONS
 # ============================================================================
 
-def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 100) -> str:
-    """Call OpenAI LLM and return response text."""
+def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 512) -> str:
+    """Call OpenAI LLM and return response text. Injects human feedback if available."""
+    messages = []
+    feedback = _get_human_feedback()
+    if feedback:
+        messages.append({"role": "system", "content": feedback})
+    messages.append({"role": "user", "content": prompt})
     response = client.chat.completions.create(
         model=model_name,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
+        max_completion_tokens=max_tokens,
+        messages=messages
     )
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content if content is not None else ""
+
+
+def _get_human_feedback() -> str:
+    """Load formatted human feedback if available."""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        fb_path = os.path.join(current_dir, "..", "utils", "feedback.py")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("feedback", fb_path)
+        fb_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fb_module)
+        return fb_module.get_formatted_feedback()
+    except Exception:
+        return ""
 
 
 # ============================================================================

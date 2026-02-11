@@ -2,14 +2,20 @@
 Paper Retrieval Module using Semantic Scholar RAG.
 
 This module handles retrieving relevant papers from Semantic Scholar
-to provide context for idea generation. Uses LLM-guided retrieval
-to intelligently search for papers.
+to provide context for idea generation. Supports multiple retrieval
+strategies that can be configured in settings.py.
+
+Available strategies:
+- llm_guided: LLM agent iteratively searches and follows references
+- keyword: Simple keyword-based search
+- custom: User-defined retrieval functions
 """
 
 import os
 import re
 import importlib.util
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Callable
+from abc import ABC, abstractmethod
 
 # Load SemanticScholar directly to avoid anthropic dependency
 def _load_semantic_scholar():
@@ -23,6 +29,182 @@ def _load_semantic_scholar():
     return module.SemanticScholarClient, module.Paper
 
 SemanticScholarClient, Paper = _load_semantic_scholar()
+
+
+# ============================================================================
+# RETRIEVAL STRATEGY REGISTRY
+# ============================================================================
+
+# Registry for custom retrieval methods
+_custom_retrieval_methods: Dict[str, Callable] = {}
+
+
+def register_retrieval_method(name: str, func: Callable):
+    """
+    Register a custom paper retrieval method.
+    
+    Args:
+        name: Name to identify this retrieval method
+        func: Callable with signature:
+              func(topic: str, client, model_name: str, target_papers: int) -> List[Paper]
+    
+    Example:
+        def my_retrieval(topic, client, model_name, target_papers):
+            # Your custom logic here
+            return [Paper(...), ...]
+        
+        register_retrieval_method("my_method", my_retrieval)
+    """
+    _custom_retrieval_methods[name] = func
+    print(f"[Paper Retrieval] Registered custom method: {name}")
+
+
+def get_available_methods() -> List[str]:
+    """Get list of all available retrieval methods."""
+    built_in = ["llm_guided", "keyword", "tavily"]
+    custom = list(_custom_retrieval_methods.keys())
+    return built_in + custom
+
+
+def retrieve_papers(
+    topic: str, 
+    client, 
+    model_name: str, 
+    target_papers: int = 120,
+    method: str = None
+) -> List[Paper]:
+    """
+    Main entry point for paper retrieval. Dispatches to the configured method.
+    
+    Args:
+        topic: Research topic description
+        client: OpenAI client for LLM calls
+        model_name: Model to use for LLM calls
+        target_papers: Target number of papers to retrieve
+        method: Override retrieval method (uses settings.RETRIEVAL_METHOD if None)
+    
+    Returns:
+        List of relevant Paper objects
+    """
+    # Load settings to get configured method
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    settings_path = os.path.join(current_dir, "..", "config", "settings.py")
+    spec = importlib.util.spec_from_file_location("settings", settings_path)
+    settings = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(settings)
+    
+    # Determine which method to use
+    retrieval_method = method or getattr(settings, 'RETRIEVAL_METHOD', 'llm_guided')
+    min_score = getattr(settings, 'MIN_PAPER_RELEVANCE_SCORE', 7)
+    
+    print(f"\n[Paper Retrieval] Using method: {retrieval_method}")
+    
+    if retrieval_method == "llm_guided":
+        return retrieve_papers_llm_guided(
+            topic=topic,
+            client=client,
+            model_name=model_name,
+            target_papers=target_papers,
+            min_score=min_score
+        )
+    elif retrieval_method == "keyword":
+        return retrieve_papers_keyword(
+            topic=topic,
+            client=client,
+            model_name=model_name,
+            target_papers=target_papers,
+            min_score=min_score
+        )
+    elif retrieval_method == "tavily":
+        return retrieve_papers_tavily(
+            topic=topic,
+            client=client,
+            model_name=model_name,
+            target_papers=target_papers,
+            min_score=min_score,
+            settings=settings
+        )
+    elif retrieval_method in _custom_retrieval_methods:
+        return _custom_retrieval_methods[retrieval_method](
+            topic=topic,
+            client=client,
+            model_name=model_name,
+            target_papers=target_papers
+        )
+    else:
+        available = get_available_methods()
+        raise ValueError(
+            f"Unknown retrieval method: '{retrieval_method}'. "
+            f"Available methods: {available}"
+        )
+
+
+# ============================================================================
+# TAVILY + ARXIV RETRIEVAL
+# ============================================================================
+
+def retrieve_papers_tavily(
+    topic: str,
+    client,
+    model_name: str,
+    target_papers: int = 20,
+    min_score: int = 5,
+    settings = None
+) -> List[Paper]:
+    """
+    Retrieve papers using Tavily search + arXiv, returning legacy Paper format.
+    
+    This is a wrapper that uses the paper_retrieval_tavily module and converts
+    the results to the legacy Paper format for compatibility with the pipeline.
+    
+    Args:
+        topic: Research topic description
+        client: OpenAI client for LLM calls
+        model_name: Model name
+        target_papers: Maximum number of papers to return
+        min_score: Minimum relevance score (1-10)
+        settings: Settings module (optional, for additional config)
+    
+    Returns:
+        List of Paper objects
+    """
+    # Import the tavily module
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    tavily_path = os.path.join(current_dir, "paper_retrieval_tavily.py")
+    
+    spec = importlib.util.spec_from_file_location("paper_retrieval_tavily", tavily_path)
+    tavily_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tavily_module)
+    
+    # Get additional settings
+    summarize_threshold = 8
+    if settings:
+        summarize_threshold = getattr(settings, 'TAVILY_SUMMARIZE_THRESHOLD', 8)
+        target_papers = getattr(settings, 'TAVILY_MAX_PAPERS', target_papers)
+    
+    # Retrieve papers using Tavily
+    retrieved_papers = tavily_module.retrieve_papers(
+        topic=topic,
+        client=client,
+        model_name=model_name,
+        max_papers=target_papers,
+        min_relevance_score=min_score,
+        summarize_threshold=summarize_threshold
+    )
+    
+    # Convert to legacy Paper format
+    legacy_papers = []
+    for rp in retrieved_papers:
+        legacy_papers.append(Paper(
+            paper_id=rp.paper_id,
+            title=rp.title,
+            abstract=rp.summary,  # Use summary for richer context
+            year=rp.year,
+            citation_count=0,  # Not available from arXiv
+            authors=rp.authors
+        ))
+    
+    return legacy_papers
 
 
 # ============================================================================
@@ -75,13 +257,22 @@ Score this paper from 1-10 based on these criteria:
 
 Provide your score as a single integer from 1-10, and nothing else."""
 
+KEYWORD_GENERATION_PROMPT = """Generate diverse search queries to find papers about this research topic.
+
+Research Topic: {topic}
+
+Generate 8-10 different keyword search queries that would help find relevant papers.
+Cover different aspects, methods, applications, and related areas.
+
+Return ONLY the queries, one per line, no numbering or explanations."""
+
 
 # ============================================================================
-# MAIN RETRIEVAL FUNCTION
+# LLM-GUIDED RETRIEVAL (Default Method)
 # ============================================================================
 
-def retrieve_papers(topic: str, client, model_name: str, 
-                   target_papers: int = 120, min_score: int = 7) -> List[Paper]:
+def retrieve_papers_llm_guided(topic: str, client, model_name: str, 
+                               target_papers: int = 120, min_score: int = 7) -> List[Paper]:
     """
     Given a research topic, use an LLM to generate Semantic Scholar API calls
     and retrieve relevant papers.
@@ -183,13 +374,32 @@ def retrieve_papers(topic: str, client, model_name: str,
 # ============================================================================
 
 def _call_llm(client, model_name: str, prompt: str, max_tokens: int = 1024) -> str:
-    """Call the LLM and return response text. Supports OpenAI API."""
+    """Call the LLM and return response text. Injects human feedback if available."""
+    messages = []
+    feedback = _get_human_feedback()
+    if feedback:
+        messages.append({"role": "system", "content": feedback})
+    messages.append({"role": "user", "content": prompt})
     response = client.chat.completions.create(
         model=model_name,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": prompt}]
+        max_completion_tokens=max_tokens,
+        messages=messages
     )
-    return response.choices[0].message.content
+    content = response.choices[0].message.content
+    return content if content is not None else ""
+
+
+def _get_human_feedback() -> str:
+    """Load formatted human feedback if available."""
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        fb_path = os.path.join(current_dir, "..", "utils", "feedback.py")
+        spec = importlib.util.spec_from_file_location("feedback", fb_path)
+        fb_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fb_module)
+        return fb_module.get_formatted_feedback()
+    except Exception:
+        return ""
 
 
 def _parse_action(action_str: str) -> Optional[Tuple[str, str]]:
@@ -278,9 +488,13 @@ def _score_papers(papers: List[Paper], topic: str, client, model_name: str) -> L
         )
         
         try:
-            response = _call_llm(client, model_name, prompt, max_tokens=10)
+            # Use higher token limit for reasoning models (includes reasoning + output tokens)
+            response = _call_llm(client, model_name, prompt, max_tokens=512)
             score = _extract_score(response)
             scored_papers.append((paper, score))
+            # Debug: show first few scores
+            if len(scored_papers) <= 3:
+                print(f"    Sample score: '{response.strip()[:30]}' → {score}")
         except Exception as e:
             print(f"    Error scoring paper '{paper.title[:50]}...': {e}")
             scored_papers.append((paper, 0))
@@ -291,11 +505,115 @@ def _score_papers(papers: List[Paper], topic: str, client, model_name: str) -> L
 
 def _extract_score(response: str) -> int:
     """Extract integer score from LLM response."""
-    # Look for first integer 1-10
-    match = re.search(r'\b([1-9]|10)\b', response.strip())
-    if match:
-        return int(match.group(1))
+    response = response.strip()
+    
+    # Try exact match first (just a number)
+    if response.isdigit():
+        score = int(response)
+        if 1 <= score <= 10:
+            return score
+    
+    # Look for patterns like "8/10", "Score: 8", "8 out of 10"
+    patterns = [
+        r'(\d+)\s*/\s*10',      # 8/10
+        r'[Ss]core[:\s]+(\d+)', # Score: 8
+        r'^(\d+)\b',            # 8 at start
+        r'\b([1-9]|10)\b',      # Any 1-10
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, response)
+        if match:
+            score = int(match.group(1))
+            if 1 <= score <= 10:
+                return score
+    
     return 0
+
+
+# ============================================================================
+# KEYWORD-BASED RETRIEVAL
+# ============================================================================
+
+def retrieve_papers_keyword(topic: str, client, model_name: str,
+                            target_papers: int = 120, min_score: int = 7) -> List[Paper]:
+    """
+    Retrieve papers using LLM-generated keyword queries (simpler than llm_guided).
+    
+    This method:
+    1. Uses LLM to generate diverse keyword queries from the topic
+    2. Executes each query against Semantic Scholar
+    3. Deduplicates results
+    4. Optionally scores and filters papers
+    
+    Args:
+        topic: Research topic description
+        client: OpenAI client for LLM calls
+        model_name: Model to use
+        target_papers: Target number of papers
+        min_score: Minimum relevance score (set to 0 to skip scoring)
+    
+    Returns:
+        List of relevant Paper objects
+    """
+    ss_client = SemanticScholarClient()
+    
+    print(f"\n[Keyword Retrieval] Generating search queries for topic:")
+    print(f"  {topic}")
+    
+    # Step 1: Generate keyword queries using LLM
+    prompt = KEYWORD_GENERATION_PROMPT.format(topic=topic)
+    response = _call_llm(client, model_name, prompt, max_tokens=512)
+    
+    # Parse queries (one per line)
+    queries = [q.strip() for q in response.strip().split('\n') if q.strip()]
+    # Remove any numbering or bullet points
+    queries = [re.sub(r'^[\d\.\-\*\)]+\s*', '', q) for q in queries]
+    
+    print(f"  Generated {len(queries)} search queries:")
+    for q in queries[:5]:
+        print(f"    - {q[:60]}...")
+    if len(queries) > 5:
+        print(f"    ... and {len(queries) - 5} more")
+    
+    # Step 2: Execute queries and collect papers
+    all_papers = {}  # paper_id -> Paper
+    papers_per_query = max(10, target_papers // len(queries)) if queries else 20
+    
+    for i, query in enumerate(queries):
+        try:
+            papers = ss_client.KeywordQuery(query, limit=papers_per_query)
+            new_count = 0
+            for paper in papers:
+                if paper.paper_id not in all_papers:
+                    all_papers[paper.paper_id] = paper
+                    new_count += 1
+            print(f"  [{i+1}/{len(queries)}] '{query[:40]}...' -> {len(papers)} results, {new_count} new")
+        except Exception as e:
+            print(f"  [{i+1}/{len(queries)}] Error: {e}")
+    
+    papers_list = list(all_papers.values())
+    print(f"\n[Keyword Retrieval] Retrieved {len(papers_list)} unique papers")
+    
+    # Step 3: Score and filter if min_score > 0
+    if min_score > 0:
+        print(f"\n[Paper Scoring] Scoring papers for relevance...")
+        scored_papers = _score_papers(papers_list, topic, client, model_name)
+        
+        filtered_papers = [(paper, score) for paper, score in scored_papers if score >= min_score]
+        filtered_papers.sort(key=lambda x: x[1], reverse=True)
+        
+        result_papers = [paper for paper, score in filtered_papers]
+        
+        print(f"[Paper Scoring] Kept {len(result_papers)} papers with score >= {min_score}")
+        if result_papers:
+            avg_score = sum(score for _, score in filtered_papers) / len(filtered_papers)
+            print(f"                Average score: {avg_score:.2f}")
+        
+        return result_papers
+    else:
+        # Return all papers without scoring (faster but less precise)
+        return papers_list
 
 
 # ============================================================================

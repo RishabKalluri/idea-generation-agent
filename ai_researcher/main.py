@@ -38,6 +38,7 @@ idea_filtering = _load_module("idea_filtering", os.path.join(SCRIPT_DIR, "module
 idea_ranking = _load_module("idea_ranking", os.path.join(SCRIPT_DIR, "modules/idea_ranking.py"))
 style_normalization = _load_module("style_normalization", os.path.join(SCRIPT_DIR, "modules/style_normalization.py"))
 semantic_scholar = _load_module("semantic_scholar", os.path.join(SCRIPT_DIR, "utils/semantic_scholar.py"))
+feedback_utils = _load_module("feedback", os.path.join(SCRIPT_DIR, "utils/feedback.py"))
 
 # Import tqdm for progress bars
 from tqdm import tqdm
@@ -65,9 +66,10 @@ RESEARCH_TOPICS = {
 
 def get_openai_client():
     """Initialize and return OpenAI client."""
-    api_key = os.environ.get("OPENAI_API_KEY")
+    # Use the key from settings (which loads from .env)
+    api_key = settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable not set")
+        raise ValueError("OPENAI_API_KEY not set. Add it to config/.env or set as environment variable")
     
     from openai import OpenAI
     return OpenAI(api_key=api_key)
@@ -202,7 +204,8 @@ def run_pipeline(
     num_papers: int = None,
     skip_retrieval: bool = False,
     papers_file: str = None,
-    model_name: str = None
+    model_name: str = None,
+    retrieval_method: str = None
 ):
     """
     Run the full idea generation pipeline for a topic.
@@ -225,6 +228,7 @@ def run_pipeline(
         skip_retrieval: Skip paper retrieval and use provided papers_file
         papers_file: Path to pre-retrieved papers JSON
         model_name: Override model name
+        retrieval_method: Paper retrieval method ("llm_guided", "keyword", or custom)
     """
     topic = RESEARCH_TOPICS[topic_key]
     
@@ -274,7 +278,8 @@ def run_pipeline(
             topic=topic,
             client=client,
             model_name=model,
-            target_papers=num_papers
+            target_papers=num_papers,
+            method=retrieval_method
         )
     
     print(f"✓ Retrieved {len(papers)} relevant papers")
@@ -287,17 +292,14 @@ def run_pipeline(
     # -------------------------------------------------------------------------
     print_banner("Step 2: Generating seed ideas")
     
-    demo_examples = idea_generation.load_demo_examples()
-    print(f"Loaded {len(demo_examples)} demonstration examples")
-    
     seed_ideas = idea_generation.generate_seed_ideas(
         topic=topic,
         papers=papers,
-        demo_examples=demo_examples,
         client=client,
         model_name=model,
         num_ideas=num_ideas,
-        rag_rate=settings.RAG_APPLICATION_RATE
+        rag_rate=settings.RAG_APPLICATION_RATE,
+        num_demo_examples=settings.NUM_DEMO_EXAMPLES
     )
     
     print(f"✓ Generated {len(seed_ideas)} seed ideas")
@@ -310,10 +312,26 @@ def run_pipeline(
     # -------------------------------------------------------------------------
     print_banner("Step 3: Deduplicating ideas")
     
-    unique_ideas = deduplication.deduplicate_ideas(
-        seed_ideas, 
-        threshold=settings.SIMILARITY_THRESHOLD
-    )
+    # Use target-based deduplication if target retention is set
+    target_retention = getattr(settings, 'TARGET_RETENTION_PERCENT', None)
+    if target_retention:
+        unique_ideas = deduplication.deduplicate_to_target(
+            seed_ideas,
+            target_percent=target_retention
+        )
+    else:
+        unique_ideas = deduplication.deduplicate_ideas(
+            seed_ideas, 
+            threshold=settings.SIMILARITY_THRESHOLD
+        )
+    
+    # Hard cap at configured percentage (minimum 1 idea)
+    hard_cap_percent = getattr(settings, 'HARD_CAP_PERCENT', None)
+    if hard_cap_percent and len(seed_ideas) > 0:
+        max_ideas = max(1, int(len(seed_ideas) * hard_cap_percent))
+        if len(unique_ideas) > max_ideas:
+            print(f"  Hard cap ({hard_cap_percent*100:.0f}%) applied: {len(unique_ideas)} → {max_ideas}")
+            unique_ideas = unique_ideas[:max_ideas]
     
     retention_rate = 100 * len(unique_ideas) / len(seed_ideas) if seed_ideas else 0
     print(f"✓ Reduced to {len(unique_ideas)} unique ideas ({retention_rate:.1f}% retained)")
@@ -334,7 +352,8 @@ def run_pipeline(
     for idea in tqdm(unique_ideas, desc="Expanding ideas"):
         try:
             proposal = idea_generation.expand_to_full_proposal(idea, client, model)
-            full_proposals.append(proposal)
+            if proposal is not None:
+                full_proposals.append(proposal)
         except Exception as e:
             print(f"  Warning: Failed to expand idea '{idea.title[:30]}...': {e}")
     
@@ -429,6 +448,18 @@ def run_pipeline(
     print(f"Top normalized: {len(normalized_proposals)}")
     print(f"\nResults saved to: {run_dir}")
     
+    # -------------------------------------------------------------------------
+    # Human-in-the-Loop Feedback
+    # -------------------------------------------------------------------------
+    human_in_loop = getattr(settings, 'HUMAN_IN_THE_LOOP', False)
+    if human_in_loop:
+        # Show existing feedback if any
+        existing = feedback_utils.load_feedback()
+        if existing:
+            print(f"\n[Feedback] Existing feedback on file ({len(existing)} chars)")
+        
+        feedback_utils.collect_feedback_interactive(topic=topic_key)
+    
     return normalized_proposals, ranked_proposals
 
 
@@ -465,15 +496,14 @@ def run_pipeline_lite(
     
     # Step 2: Generate ideas
     print("\n[2/4] Generating ideas...")
-    demo_examples = idea_generation.load_demo_examples()
     seed_ideas = idea_generation.generate_seed_ideas(
         topic=topic,
         papers=papers,
-        demo_examples=demo_examples,
         client=client,
         model_name=model,
         num_ideas=num_ideas,
-        rag_rate=0.5
+        rag_rate=0.5,
+        num_demo_examples=2
     )
     print(f"  ✓ {len(seed_ideas)} ideas")
     
@@ -565,8 +595,37 @@ Available topics: """ + ", ".join(RESEARCH_TOPICS.keys())
         default=None,
         help="Path to pre-retrieved papers JSON (use with --skip_retrieval)"
     )
+    parser.add_argument(
+        "--retrieval_method",
+        type=str,
+        default=None,
+        choices=["llm_guided", "keyword", "tavily"],
+        help="Paper retrieval method (default: from settings.RETRIEVAL_METHOD)"
+    )
+    parser.add_argument(
+        "--human_feedback",
+        action="store_true",
+        help="Enable human-in-the-loop: pause after results to collect feedback"
+    )
+    parser.add_argument(
+        "--clear_feedback",
+        action="store_true",
+        help="Clear all accumulated human feedback before running"
+    )
     
     args = parser.parse_args()
+    
+    # Handle feedback flags
+    if args.human_feedback:
+        settings.HUMAN_IN_THE_LOOP = True
+    if args.clear_feedback:
+        feedback_utils.clear_feedback()
+        print("✓ All previous feedback cleared.")
+    
+    # Show feedback status
+    existing_feedback = feedback_utils.load_feedback()
+    if existing_feedback:
+        print(f"[Feedback] Loaded {len(existing_feedback)} chars of accumulated feedback")
     
     # Check API key
     if not os.environ.get("OPENAI_API_KEY"):
@@ -590,5 +649,6 @@ Available topics: """ + ", ".join(RESEARCH_TOPICS.keys())
             num_papers=args.num_papers,
             skip_retrieval=args.skip_retrieval,
             papers_file=args.papers_file,
-            model_name=args.model
+            model_name=args.model,
+            retrieval_method=args.retrieval_method
         )

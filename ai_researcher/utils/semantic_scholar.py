@@ -35,36 +35,26 @@ class SemanticScholarClient:
         if self.api_key:
             self.headers["x-api-key"] = self.api_key
         
-        # Rate limiting: 100 requests per 5 minutes (300 seconds) without API key
-        # With API key, limits are higher but we'll still track
-        self.rate_limit_window = 300  # 5 minutes in seconds
-        self.max_requests = 100 if not self.api_key else 1000
-        self.request_times = deque()
+        # Rate limiting: 1 request per second (API key rate limit)
+        # This is enforced by tracking the last request time
+        self.last_request_time = 0.0
+        self.min_request_interval = 1.0  # 1 second between requests
         
         # Simple cache to avoid duplicate API calls
         self.cache: Dict[str, Any] = {}
     
     def _wait_if_rate_limited(self):
-        """Implement rate limiting by tracking request times."""
+        """Enforce 1 request per second rate limit."""
         current_time = time.time()
+        time_since_last = current_time - self.last_request_time
         
-        # Remove requests outside the current window
-        while self.request_times and current_time - self.request_times[0] > self.rate_limit_window:
-            self.request_times.popleft()
+        # If we're requesting too fast, wait
+        if time_since_last < self.min_request_interval:
+            sleep_time = self.min_request_interval - time_since_last
+            time.sleep(sleep_time)
         
-        # If we've hit the rate limit, wait
-        if len(self.request_times) >= self.max_requests:
-            sleep_time = self.rate_limit_window - (current_time - self.request_times[0])
-            if sleep_time > 0:
-                print(f"Rate limit reached. Waiting {sleep_time:.2f} seconds...")
-                time.sleep(sleep_time)
-                # Clear old requests after waiting
-                current_time = time.time()
-                while self.request_times and current_time - self.request_times[0] > self.rate_limit_window:
-                    self.request_times.popleft()
-        
-        # Record this request
-        self.request_times.append(current_time)
+        # Record this request time
+        self.last_request_time = time.time()
     
     def _make_request(self, url: str, params: Optional[Dict] = None) -> Dict:
         """

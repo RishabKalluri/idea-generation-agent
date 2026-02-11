@@ -749,7 +749,7 @@ class TestIntegration:
         papers = paper_retrieval.retrieve_papers(
             topic="chain of thought prompting",
             client=client,
-            model_name="gpt-4o-mini",
+            model_name="gpt-5-mini",
             target_papers=10
         )
         
@@ -775,7 +775,7 @@ class TestIntegration:
             topic="improving factuality in LLMs",
             papers=papers,
             client=client,
-            model_name="gpt-4o-mini",
+            model_name="gpt-5-mini",
             num_ideas=2,
             rag_rate=0.5,
             num_demo_examples=2
@@ -798,7 +798,7 @@ class TestIntegration:
         
         idea = create_sample_seed_ideas(1)[0]
         proposal = idea_generation.expand_to_full_proposal(
-            idea, client, "gpt-4o-mini"
+            idea, client, "gpt-5-mini"
         )
         
         # Check proposal has expected attributes
@@ -827,7 +827,7 @@ class TestIntegration:
         papers = create_sample_papers(3)
         
         is_novel, reason = idea_filtering.check_novelty(
-            proposal, papers, client, "gpt-4o-mini"
+            proposal, papers, client, "gpt-5-mini"
         )
         
         assert isinstance(is_novel, bool)
@@ -845,7 +845,7 @@ class TestIntegration:
         proposal = create_sample_proposals(1)[0]
         
         is_feasible, reason = idea_filtering.check_feasibility(
-            proposal, client, "gpt-4o-mini"
+            proposal, client, "gpt-5-mini"
         )
         
         assert isinstance(is_feasible, bool)
@@ -864,7 +864,7 @@ class TestIntegration:
         
         # pairwise_compare returns (winner, raw_response) where winner is 'A' or 'B'
         result = idea_ranking.pairwise_compare(
-            proposals[0], proposals[1], client, "gpt-4o-mini"
+            proposals[0], proposals[1], client, "gpt-5-mini"
         )
         
         # Handle both tuple return and single value return
@@ -888,7 +888,7 @@ class TestIntegration:
         template = style_normalization.get_default_template()
         
         normalized = style_normalization.normalize_style(
-            proposal, template, client, "gpt-4o-mini"
+            proposal, template, client, "gpt-5-mini"
         )
         
         # Check normalized has expected attributes (FullProposal-like)
@@ -916,7 +916,7 @@ def test_full_pipeline_small():
     
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
-    model = "gpt-4o-mini"
+    model = "gpt-5-mini"
     
     print("\n" + "="*60)
     print("FULL PIPELINE INTEGRATION TEST (Small)")
